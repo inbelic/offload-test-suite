@@ -134,7 +134,7 @@ DescriptorSets:
 # XFAIL: Clang
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_3 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
 # RUN: obj2yaml %t.o | FileCheck %s --check-prefix=OBJ
 
