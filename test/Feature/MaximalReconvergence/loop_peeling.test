@@ -5,7 +5,7 @@ RWStructuredBuffer<uint> Out : register(u0);
 void main(uint3 TID : SV_GroupThreadID) {
     for (uint i = 0; i < 64; i++) {
         if (i == TID.x) {
-            Out[TID.x] = WaveActiveMax(TID.x);
+            Out[TID.x] = WaveActiveSum(TID.x);
             break;
         }
     }
