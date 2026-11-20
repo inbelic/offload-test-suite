@@ -1,0 +1,130 @@
+#--- common.hlsl
+// Each attribute is an affine function of the render target pixel coordinate
+// Q (origin at the top-left, +Y down). The vertex shader writes these with
+// W = 1, so interpolating an attribute at any location Q gives the same
+// function evaluated at Q.
+float FS(float2 Q) { return Q.x + 2 * Q.y; }
+float2 FV2(float2 Q) { return Q; }
+float3 FV3(float2 Q) { return float3(Q.y - Q.x, 2 * Q.x, 3 - Q.y); }
+float4 FV4(float2 Q) { return float4(Q.x + Q.y, Q.x - Q.y, Q.x / 2, 1 - Q.y); }
+
+// Maps an NDC position to pixel coordinates of the 4x4 render target.
+float2 ToPixel(float2 NDC) { return float2(NDC.x + 1, 1 - NDC.y) * 2; }
+
+#--- vertex.hlsl
+#include "common.hlsl"
+
+struct VSOutput {
+  float4 Pos : SV_Position;
+  half S : ATTR0;
+  half2 V2 : ATTR1;
+  half3 V3 : ATTR2;
+  half4 V4 : ATTR3;
+};
+
+VSOutput main(float2 Position : POSITION) {
+  float2 P = ToPixel(Position);
+  VSOutput O;
+  O.Pos = float4(Position, 0, 1);
+  O.S = (half)FS(P);
+  O.V2 = (half2)FV2(P);
+  O.V3 = (half3)FV3(P);
+  O.V4 = (half4)FV4(P);
+  return O;
+}
+
+#--- pixel.hlsl
+#include "common.hlsl"
+
+struct PSInput {
+  float4 Pos : SV_Position;
+  uint SampleIndex : SV_SampleIndex;
+  half S : ATTR0;
+  half2 V2 : ATTR1;
+  half3 V3 : ATTR2;
+  half4 V4 : ATTR3;
+};
+
+static const float Tol = 0.015625;
+#define NEAR(A, B) all(abs((A) - (B)) <= Tol)
+
+float4 main(PSInput I) : SV_Target {
+  // Evaluate at the sample this invocation runs for, at SV_Position.
+  half S = EvaluateAttributeAtSample(I.S, I.SampleIndex);
+  half2 V2 = EvaluateAttributeAtSample(I.V2, I.SampleIndex);
+  half3 V3 = EvaluateAttributeAtSample(I.V3, I.SampleIndex);
+  half4 V4 = EvaluateAttributeAtSample(I.V4, I.SampleIndex);
+
+  bool Pass = NEAR((float)S, FS(I.Pos.xy)) &&
+              NEAR((float2)V2, FV2(I.Pos.xy)) &&
+              NEAR((float3)V3, FV3(I.Pos.xy)) &&
+              NEAR((float4)V4, FV4(I.Pos.xy));
+  return (float4)Pass;
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # Two triangles covering the whole render target.
+  - Name: VertexData
+    Format: Float32
+    Stride: 8
+    Data: [-1, -1, -1, 1, 1, 1,
+           1, 1, 1, -1, -1, -1]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 256
+    OutputProps:
+      Height: 4
+      Width: 4
+      Depth: 1
+  - Name: ExpectedOut
+    Format: Float32
+    Channels: 4
+    FillSize: 256
+    FillValue: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 2
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+  SampleCount: 4
+DescriptorSets: []
+Results:
+  - Result: Evaluate
+    Rule: BufferExact
+    Actual: Output
+    Expected: ExpectedOut
+...
+#--- end
+
+# EvaluateAttributeAtSample(Attr, Index) returns Attr interpolated at the
+# location of sample Index. Reading SV_SampleIndex makes the pixel shader run
+# once per sample of the 4x MSAA render target, and SV_Position then holds the
+# location of that sample, so evaluating at the current sample must match the
+# attribute functions evaluated at SV_Position. Every sample writes 1 on
+# success, so the resolved render target is 1 everywhere only if every sample
+# of every pixel passes.
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/99109
+# XFAIL: Clang
+
+# Bug: DXC's SPIR-V backend emits GLSL.std.450 InterpolateAt* on 16-bit
+# floats, which only accepts 32-bit floats, and fails validation.
+# XFAIL: DXC && Vulkan
+
+# REQUIRES: Half && (!Vulkan || (VulkanSampleRateShading && VulkanStorageInputOutput16))
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_2 -enable-16bit-types -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_2 -enable-16bit-types -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
