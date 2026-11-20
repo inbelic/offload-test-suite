@@ -1,0 +1,126 @@
+#--- common.hlsl
+// Each attribute is an affine function of the render target pixel coordinate
+// Q (origin at the top-left, +Y down). The vertex shader writes these with
+// W = 1, so interpolating an attribute at any location Q gives the same
+// function evaluated at Q.
+float FS(float2 Q) { return Q.x + 2 * Q.y; }
+float2 FV2(float2 Q) { return Q; }
+float3 FV3(float2 Q) { return float3(Q.y - Q.x, 2 * Q.x, 3 - Q.y); }
+float4 FV4(float2 Q) { return float4(Q.x + Q.y, Q.x - Q.y, Q.x / 2, 1 - Q.y); }
+
+// Maps an NDC position to pixel coordinates of the 4x4 render target.
+float2 ToPixel(float2 NDC) { return float2(NDC.x + 1, 1 - NDC.y) * 2; }
+
+#--- vertex.hlsl
+#include "common.hlsl"
+
+struct VSOutput {
+  float4 Pos : SV_Position;
+  float S : ATTR0;
+  float2 V2 : ATTR1;
+  float3 V3 : ATTR2;
+  float4 V4 : ATTR3;
+};
+
+VSOutput main(float2 Position : POSITION) {
+  float2 P = ToPixel(Position);
+  VSOutput O;
+  O.Pos = float4(Position, 0, 1);
+  O.S = (float)FS(P);
+  O.V2 = (float2)FV2(P);
+  O.V3 = (float3)FV3(P);
+  O.V4 = (float4)FV4(P);
+  return O;
+}
+
+#--- pixel.hlsl
+#include "common.hlsl"
+
+struct PSInput {
+  float4 Pos : SV_Position;
+  float S : ATTR0;
+  float2 V2 : ATTR1;
+  float3 V3 : ATTR2;
+  float4 V4 : ATTR3;
+};
+
+static const float Tol = 0.001;
+#define NEAR(A, B) all(abs((A) - (B)) <= Tol)
+
+float4 main(PSInput I) : SV_Target {
+  float S0 = EvaluateAttributeSnapped(I.S, int2(0, 0));
+  float S1 = EvaluateAttributeSnapped(I.S, int2(-8, -8));
+  float2 V2 = EvaluateAttributeSnapped(I.V2, int2(7, -8));
+  float3 V3 = EvaluateAttributeSnapped(I.V3, int2(-5, 3));
+  float4 V4 = EvaluateAttributeSnapped(I.V4, int2(2, 6));
+
+  bool Pass = NEAR(S0, FS(I.Pos.xy + float2(0, 0) / 16)) &&
+              NEAR(S1, FS(I.Pos.xy + float2(-8, -8) / 16)) &&
+              NEAR(V2, FV2(I.Pos.xy + float2(7, -8) / 16)) &&
+              NEAR(V3, FV3(I.Pos.xy + float2(-5, 3) / 16)) &&
+              NEAR(V4, FV4(I.Pos.xy + float2(2, 6) / 16));
+  return (float4)Pass;
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # Two triangles covering the whole render target.
+  - Name: VertexData
+    Format: Float32
+    Stride: 8
+    Data: [-1, -1, -1, 1, 1, 1,
+           1, 1, 1, -1, -1, -1]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 256
+    OutputProps:
+      Height: 4
+      Width: 4
+      Depth: 1
+  - Name: ExpectedOut
+    Format: Float32
+    Channels: 4
+    FillSize: 256
+    FillValue: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 2
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: Evaluate
+    Rule: BufferExact
+    Actual: Output
+    Expected: ExpectedOut
+...
+#--- end
+
+# EvaluateAttributeSnapped(Attr, Offset) returns Attr interpolated at the pixel
+# center (SV_Position) moved by Offset, given in 1/16th pixel units with each
+# component in [-8, 7]. The result must match the attribute functions
+# evaluated at SV_Position + Offset / 16.
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/99111
+# XFAIL: Clang
+
+# Bug: DXC's SPIR-V backend passes the 1/16th pixel offset to
+# InterpolateAtOffset unscaled, i.e. as a whole pixel offset.
+# XFAIL: DXC && Vulkan
+
+# REQUIRES: !Vulkan || VulkanSampleRateShading
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
