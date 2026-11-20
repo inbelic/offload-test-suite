@@ -262,6 +262,13 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Double")
         if device["Features"].get("shaderInt64", False):
             config.available_features.add("Int64")
+        # Required for 16-bit stage inputs/outputs (StorageInputOutput16).
+        if device["Features"].get("storageInputOutput16", False):
+            config.available_features.add("VulkanStorageInputOutput16")
+        # Required for the GLSL.std.450 InterpolateAt* instructions
+        # (InterpolationFunction) and for per-sample shading.
+        if device["Features"].get("sampleRateShading", False):
+            config.available_features.add("VulkanSampleRateShading")
         if device["Features"].get("shaderSharedInt64Atomics", False):
             config.available_features.add("Int64GroupSharedAtomics")
         if device["Features"].get("shaderBufferInt64Atomics", False):
