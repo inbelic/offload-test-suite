@@ -1,0 +1,187 @@
+#--- vertex.hlsl
+struct VSOutput {
+  float4 Pos : SV_Position;
+  nointerpolation float3x2 M32 : MATA;
+  nointerpolation float2x4 M24 : MATB;
+  nointerpolation float3x1 M31 : MATC;
+  nointerpolation float4x4 M44 : MATD;
+};
+
+VSOutput main(float2 Position : POSITION, uint VertexID : SV_VertexID) {
+  float V = (float)(VertexID + 1);
+  VSOutput O;
+  O.Pos = float4(Position, 0, 1);
+  O.M32 = float3x2(1, 2, 3, 4, 5, 6) * V;
+  O.M24 = float2x4(1, 2, 3, 4, 5, 6, 7, 8) * V;
+  O.M31 = float3x1(1, 2, 3) * V;
+  O.M44 = float4x4(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16) * V;
+  return O;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+  float4 Pos : SV_Position;
+  nointerpolation float3x2 M32 : MATA;
+  nointerpolation float2x4 M24 : MATB;
+  nointerpolation float3x1 M31 : MATC;
+  nointerpolation float4x4 M44 : MATD;
+};
+
+RWStructuredBuffer<float4> Out : register(u0);
+
+float4 main(PSInput I) : SV_Target {
+  float3x2 M32V0 = GetAttributeAtVertex(I.M32, 0);
+  float2x4 M24V0 = GetAttributeAtVertex(I.M24, 0);
+  float3x1 M31V0 = GetAttributeAtVertex(I.M31, 0);
+  float4x4 M44V0 = GetAttributeAtVertex(I.M44, 0);
+  float3x2 M32V1 = GetAttributeAtVertex(I.M32, 1);
+  float2x4 M24V1 = GetAttributeAtVertex(I.M24, 1);
+  float3x1 M31V1 = GetAttributeAtVertex(I.M31, 1);
+  float4x4 M44V1 = GetAttributeAtVertex(I.M44, 1);
+  float3x2 M32V2 = GetAttributeAtVertex(I.M32, 2);
+  float2x4 M24V2 = GetAttributeAtVertex(I.M24, 2);
+  float3x1 M31V2 = GetAttributeAtVertex(I.M31, 2);
+  float4x4 M44V2 = GetAttributeAtVertex(I.M44, 2);
+
+  Out[0] = float4(M32V0[0], 0, 0);
+  Out[1] = float4(M32V0[1], 0, 0);
+  Out[2] = float4(M32V0[2], 0, 0);
+  Out[3] = M24V0[0];
+  Out[4] = M24V0[1];
+  Out[5] = float4(M31V0[0], 0, 0, 0);
+  Out[6] = float4(M31V0[1], 0, 0, 0);
+  Out[7] = float4(M31V0[2], 0, 0, 0);
+  Out[8] = M44V0[0];
+  Out[9] = M44V0[1];
+  Out[10] = M44V0[2];
+  Out[11] = M44V0[3];
+
+  Out[12] = float4(M32V1[0], 0, 0);
+  Out[13] = float4(M32V1[1], 0, 0);
+  Out[14] = float4(M32V1[2], 0, 0);
+  Out[15] = M24V1[0];
+  Out[16] = M24V1[1];
+  Out[17] = float4(M31V1[0], 0, 0, 0);
+  Out[18] = float4(M31V1[1], 0, 0, 0);
+  Out[19] = float4(M31V1[2], 0, 0, 0);
+  Out[20] = M44V1[0];
+  Out[21] = M44V1[1];
+  Out[22] = M44V1[2];
+  Out[23] = M44V1[3];
+
+  Out[24] = float4(M32V2[0], 0, 0);
+  Out[25] = float4(M32V2[1], 0, 0);
+  Out[26] = float4(M32V2[2], 0, 0);
+  Out[27] = M24V2[0];
+  Out[28] = M24V2[1];
+  Out[29] = float4(M31V2[0], 0, 0, 0);
+  Out[30] = float4(M31V2[1], 0, 0, 0);
+  Out[31] = float4(M31V2[2], 0, 0, 0);
+  Out[32] = M44V2[0];
+  Out[33] = M44V2[1];
+  Out[34] = M44V2[2];
+  Out[35] = M44V2[3];
+  return 0;
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 8
+    Data: [-1, -1, 3, -1, -1, 3]
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps:
+      Height: 1
+      Width: 1
+      Depth: 1
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 576
+    FillValue: 12345 # Any value the shader does not write fails.
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    Data: [1, 2, 0, 0,
+           3, 4, 0, 0,
+           5, 6, 0, 0,
+           1, 2, 3, 4,
+           5, 6, 7, 8,
+           1, 0, 0, 0,
+           2, 0, 0, 0,
+           3, 0, 0, 0,
+           1, 2, 3, 4,
+           5, 6, 7, 8,
+           9, 10, 11, 12,
+           13, 14, 15, 16,
+           2, 4, 0, 0,
+           6, 8, 0, 0,
+           10, 12, 0, 0,
+           2, 4, 6, 8,
+           10, 12, 14, 16,
+           2, 0, 0, 0,
+           4, 0, 0, 0,
+           6, 0, 0, 0,
+           2, 4, 6, 8,
+           10, 12, 14, 16,
+           18, 20, 22, 24,
+           26, 28, 30, 32,
+           3, 6, 0, 0,
+           9, 12, 0, 0,
+           15, 18, 0, 0,
+           3, 6, 9, 12,
+           15, 18, 21, 24,
+           3, 0, 0, 0,
+           6, 0, 0, 0,
+           9, 0, 0, 0,
+           3, 6, 9, 12,
+           15, 18, 21, 24,
+           27, 30, 33, 36,
+           39, 42, 45, 48]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 2
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RenderTarget
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: AttributeAtVertex
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+...
+#--- end
+
+# A constant-folded matrix is not applicable: the argument must be a pixel
+# shader input.
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/99201
+# XFAIL: Clang
+
+# REQUIRES: SM_6_1 && Barycentrics
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_1 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
